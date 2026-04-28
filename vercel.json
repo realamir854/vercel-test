@@ -1,5 +1,5 @@
 {
-  "version": 3,
+  "version": 2,
   "name": "vercel-test",
   "rewrites": [
     { "source": "/(.*)", "destination": "/api/index" }
