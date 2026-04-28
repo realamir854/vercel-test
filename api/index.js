@@ -1,8 +1,8 @@
-export const setup = { runtime: "edge" };
-
-const BACKEND_ROOT = (process.env.REMOTE_HOST || "").replace(/\/$/, "");
-
-const FILTERED_HEADERS = new Set([
+export const config = { runtime: "edge" };
+ // TARGET_BASE
+const TARGET_BASE = (process.env.TARGET_DOMAIN || "").replace(/\/$/, "");
+ // STRIP_HEADERS
+const STRIP_HEADERS = new Set([
   "host",
   "connection",
   "keep-alive",
@@ -18,45 +18,49 @@ const FILTERED_HEADERS = new Set([
   "x-forwarded-port",
 ]);
 
-export default async function gateway(request) {
-  if (!BACKEND_ROOT) {
-    return new Response("Config Error: REMOTE_HOST missing", { status: 500 });
+
+ // Misconfigured
+export default async function handler(req) {
+  if (!TARGET_BASE) {
+    return new Response("Misconfigured: TARGET_DOMAIN is not set", { status: 500 });
   }
-
+// pathStart, targetUrl
   try {
-    const slashIndex = request.url.indexOf("/", 8);
-    const destination =
-      slashIndex === -1 ? BACKEND_ROOT + "/" : BACKEND_ROOT + request.url.slice(slashIndex);
+    const pathStart = req.url.indexOf("/", 8);
+    const targetUrl =
+      pathStart === -1 ? TARGET_BASE + "/" : TARGET_BASE + req.url.slice(pathStart);
 
-    const headersForward = new Headers();
-    let realClientIp = null;
-    for (const [key, val] of request.headers) {
-      if (FILTERED_HEADERS.has(key)) continue;
-      if (key.startsWith("x-vercel-")) continue;
-      if (key === "x-real-ip") {
-        realClientIp = val;
+    const out = new Headers();
+    let clientIp = null;
+    for (const [k, v] of req.headers) {
+      if (STRIP_HEADERS.has(k)) continue;
+      if (k.startsWith("x-vercel-")) continue;
+      if (k === "x-real-ip") {
+        clientIp = v;
         continue;
       }
-      if (key === "x-forwarded-for") {
-        if (!realClientIp) realClientIp = val;
+      if (k === "x-forwarded-for") {
+        if (!clientIp) clientIp = v;
         continue;
       }
-      headersForward.set(key, val);
+      out.set(k, v);
     }
-    if (realClientIp) headersForward.set("x-forwarded-for", realClientIp);
+    if (clientIp) out.set("x-forwarded-for", clientIp);
 
-    const httpMethod = request.method;
-    const allowBody = httpMethod !== "GET" && httpMethod !== "HEAD";
-
-    return await fetch(destination, {
-      method: httpMethod,
-      headers: headersForward,
-      body: allowBody ? request.body : undefined,
+    const method = req.method;
+    const hasBody = method !== "GET" && method !== "HEAD";
+   // targetUrl
+    return await fetch(targetUrl, {
+      method,
+      headers: out,
+      body: hasBody ? req.body : undefined,
       duplex: "half",
       redirect: "manual",
     });
   } catch (err) {
-    console.error("proxy tunnel error:", err);
-    return new Response("Failed to reach backend", { status: 502 });
+
+    console.error("relay error:", err);
+    return new Response("Bad Gateway: Tunnel Failed", { status: 502 });
+
   }
 }
